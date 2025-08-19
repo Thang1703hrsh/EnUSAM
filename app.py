@@ -66,9 +66,9 @@ c1, c2, c3 = st.columns(3)
 with c1:
     ckpt_path = st.text_input("Checkpoint path", value="Weight/SAM.bin")
 with c2:
-    img_path  = st.text_input("Image path", value="Image/case101_day20_slice_0085.npy")
+    img_path  = st.text_input("Image path", value=img_path)
 with c3:
-    gt_path   = st.text_input("GT mask path (.npy, optional)", value="mask/case101_day20_slice_0085.npy")
+    gt_path   = st.text_input("GT mask path (.npy, optional)", value=gt_path)
 
 ckpt_upload = st.file_uploader("upload checkpoint", type=["bin","pt","pth"])
 img_upload  = st.file_uploader("upload ảnh", type=["npy","jpg","jpeg","png"])
