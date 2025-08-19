@@ -1,5 +1,5 @@
-# app.py  (no pandas) + legend + Dice/IoU CSV
-import io, os, tempfile
+# app.py
+import os, tempfile
 import numpy as np
 import torch
 import torch.nn.functional as F
