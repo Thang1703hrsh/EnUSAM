@@ -15,12 +15,55 @@ torch.set_grad_enabled(False)
 st.set_page_config(page_title="En-U-SAMNet", layout="wide")
 st.title("En-U-SAMNet: MÔ HÌNH HỌC SÂU KẾT HỢP CHO VIỆC PHÁT HIỆN MỘT SỐ CƠ QUAN ĐƯỜNG TIÊU HOÁ")
 
+import os
+
+def list_files(dirpath: str, exts: tuple[str, ...]) -> list[str]:
+    """Liệt kê đường dẫn file trong dirpath có phần mở rộng thuộc exts."""
+    try:
+        files = [
+            os.path.join(dirpath, f)
+            for f in os.listdir(dirpath)
+            if f.lower().endswith(exts)
+        ]
+        files.sort(key=lambda p: os.path.basename(p).lower())
+        return files
+    except Exception:
+        return []
+    
 with st.sidebar:
     st.header("Model / Inference")
     num_classes = 3
     st.divider()
-    thr          = st.slider("Ngưỡng sigmoid", 0.0, 1.0, 0.50, 0.01)
-    alpha        = st.slider("Opacity overlay", 0.0, 1.0, 0.45, 0.05)
+    thr   = st.slider("Ngưỡng sigmoid", 0.0, 1.0, 0.50, 0.01)
+    alpha = st.slider("Opacity overlay", 0.0, 1.0, 0.45, 0.05)
+
+    st.markdown("---")
+    st.subheader("Chọn file từ thư mục")
+
+    img_dir = st.text_input("Thư mục ảnh", value="Image")
+    msk_dir = st.text_input("Thư mục GT",  value="mask")
+
+    # Liệt kê file
+    img_list = list_files(img_dir, (".npy", ".jpg", ".jpeg", ".png"))
+    gt_list  = list_files(msk_dir, (".npy",))
+
+    if not img_list:
+        st.warning(f"Không tìm thấy ảnh trong: {img_dir}")
+    # Ảnh đầu vào (bắt buộc)
+    img_path = st.selectbox(
+        "Ảnh đầu vào",
+        img_list,
+        index=0 if img_list else None,
+        format_func=lambda p: os.path.basename(p) if p else "(không có)"
+    )
+
+    # GT mask (tùy chọn, chỉ .npy)
+    gt_path = st.selectbox(
+        "GT mask (.npy, tuỳ chọn)",
+        [None] + gt_list,
+        index=0,
+        format_func=lambda p: "(None)" if p is None else os.path.basename(p)
+    )
 
 c1, c2, c3 = st.columns(3)
 with c1:
@@ -216,9 +259,9 @@ else:
     # ======= Hiển thị 1 hàng: Input | Pred | Overlay =======
     st.subheader("Prediction")
     cA, cB, cC = st.columns(3)
-    with cA: st.image(vis0,    caption=f"Input ({Wt}x{Ht})", use_column_width=True)
-    with cB: st.image(pred_hwc,caption="Pred mask (HWC)",   use_column_width=True)
-    with cC: st.image(overlay, caption="Overlay",           use_column_width=True)
+    with cA: st.image(vis0,    caption=f"Input ({Wt}x{Ht})", use_container_width=True)
+    with cB: st.image(pred_hwc,caption="Pred mask (HWC)",   use_container_width=True)
+    with cC: st.image(overlay, caption="Overlay",           use_container_width=True)
 
     # ======= (Tuỳ chọn) hiển thị & ĐÁNH GIÁ GT =======
     if gt_path and os.path.exists(gt_path):
@@ -249,9 +292,9 @@ else:
 
             st.subheader("Ground Truth")
             g0, g1, g2 = st.columns(3)
-            with g0: st.image(vis0,    caption=f"Input ({Wt}x{Ht})", use_column_width=True)
-            with g1: st.image(g_rgb,   caption="GT mask (HWC 0/255)", use_column_width=True)
-            with g2: st.image(g_overlay, caption="GT overlay", use_column_width=True)
+            with g0: st.image(vis0,    caption=f"Input ({Wt}x{Ht})", use_container_width=True)
+            with g1: st.image(g_rgb,   caption="GT mask (HWC 0/255)", use_container_width=True)
+            with g2: st.image(g_overlay, caption="GT overlay", use_container_width=True)
 
             # -------- Legend (kênh → màu) ----------
             st.markdown("**Chú giải màu (Legend)** — mỗi *kênh* → một màu RGB:")
@@ -261,7 +304,7 @@ else:
             bophan_names = ["ruột già" , "ruột non", "dạ dày"]
             for i in range(num_classes):
                 chip = np.full((36, 36, 3), palette[i], dtype=np.uint8)
-                legend_cols[i].image(chip, caption=f"{class_names[i]} — {bophan_names[i]}", use_column_width=False)
+                legend_cols[i].image(chip, caption=f"{class_names[i]} — {bophan_names[i]}", use_container_width=False)
                 
             # ---------- Dice/IoU table ----------
             C_pred = bin_1.shape[0]
