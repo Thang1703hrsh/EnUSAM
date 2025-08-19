@@ -1,4 +1,4 @@
-# app.py  (no pandas)
+# app.py  (no pandas) + legend + Dice/IoU CSV
 import io, os, tempfile
 import numpy as np
 import torch
@@ -12,28 +12,26 @@ ImageFile.LOAD_TRUNCATED_IMAGES = True
 torch.set_grad_enabled(False)
 
 # ================= UI =================
-st.set_page_config(page_title="SMP U-Net — Dataloader Inference (no pandas)", layout="wide")
-st.title("🧠 SMP U-Net — Inference qua DataLoader (single checkpoint, NO pandas)")
+st.set_page_config(page_title="En-U-SAMNet", layout="wide")
+st.title("En-U-SAMNet: MÔ HÌNH HỌC SÂU KẾT HỢP CHO VIỆC PHÁT HIỆN MỘT SỐ CƠ QUAN ĐƯỜNG TIÊU HOÁ")
 
 with st.sidebar:
     st.header("Model / Inference")
     num_classes = 3
-    # use_imagenet = st.checkbox("Chuẩn hoá ImageNet mean/std", value=False)
     st.divider()
     thr          = st.slider("Ngưỡng sigmoid", 0.0, 1.0, 0.50, 0.01)
     alpha        = st.slider("Opacity overlay", 0.0, 1.0, 0.45, 0.05)
 
-st.markdown("**Đường dẫn mặc định (có thể giữ nguyên):**")
 c1, c2, c3 = st.columns(3)
 with c1:
-    ckpt_path = st.text_input("Checkpoint path", value="C:/Users/Thang Tran/Desktop/UWMGI/Weight/SAM.bin")
+    ckpt_path = st.text_input("Checkpoint path", value="Weight/SAM.bin")
 with c2:
-    img_path  = st.text_input("Image path", value="C:/Users/Thang Tran/Desktop/UWMGI/Image/case101_day20_slice_0085.npy")
+    img_path  = st.text_input("Image path", value="Image/case101_day20_slice_0085.npy")
 with c3:
-    gt_path   = st.text_input("GT mask path (.npy, optional)", value="C:/Users/Thang Tran/Desktop/UWMGI/mask/case101_day20_slice_0085.npy")
+    gt_path   = st.text_input("GT mask path (.npy, optional)", value="mask/case101_day20_slice_0085.npy")
 
-ckpt_upload = st.file_uploader("Hoặc upload checkpoint", type=["bin","pt","pth"])
-img_upload  = st.file_uploader("Hoặc upload ảnh", type=["npy","jpg","jpeg","png"])
+ckpt_upload = st.file_uploader("upload checkpoint", type=["bin","pt","pth"])
+img_upload  = st.file_uploader("upload ảnh", type=["npy","jpg","jpeg","png"])
 gt_upload   = st.file_uploader("Upload GT mask (tuỳ chọn, .npy)", type=["npy"])
 
 # ================= Helpers =================
@@ -97,7 +95,7 @@ def unpad(t: torch.Tensor, pads):
 def chw_bin_to_hwc3(bin_chw: np.ndarray) -> np.ndarray:
     C,H,W = bin_chw.shape
     if C >= 3:
-        return (np.transpose(bin_chw[:3], (1,2,0))*255).astype(np.uint8)
+        return (np.transpose(bin_chw[:3], (1,2,0))*255).astype(np.uint8)  # R, G, B
     elif C == 1:
         g = (bin_chw[0]*255).astype(np.uint8)
         return np.stack([g,g,g], axis=-1)
@@ -105,6 +103,15 @@ def chw_bin_to_hwc3(bin_chw: np.ndarray) -> np.ndarray:
         reps = (3 + C - 1)//C
         tiled = np.tile(bin_chw, (reps,1,1))[:3]
         return (np.transpose(tiled,(1,2,0))*255).astype(np.uint8)
+
+def dice_iou(pred_bin: np.ndarray, gt_bin: np.ndarray, eps: float = 1e-7):
+    """pred_bin, gt_bin: [H,W] 0/1"""
+    p = pred_bin.astype(bool); g = gt_bin.astype(bool)
+    inter = np.logical_and(p, g).sum()
+    union = np.logical_or(p, g).sum()
+    dice = (2*inter) / (p.sum() + g.sum() + eps)
+    iou  = inter / (union + eps)
+    return float(dice), float(iou), int(p.sum()), int(g.sum())
 
 # ================= Dataset & Dataloader (no pandas) =================
 class SimpleImageDataset(Dataset):
@@ -122,23 +129,31 @@ class SimpleImageDataset(Dataset):
         return x, vis, p
 
 # ================= Model =================
-
 def build_model():
     model = smp.Unet(
-        encoder_name="efficientnet-b2",      # choose encoder, e.g. mobilenet_v2 or efficientnet-b7
-        encoder_weights="imagenet",     # use `imagenet` pre-trained weights for encoder initialization
-        in_channels=3,                  # model input channels (1 for gray-scale images, 3 for RGB, etc.)
-        classes=num_classes,        # model output channels (number of classes in your dataset)
+        encoder_name="efficientnet-b2",
+        encoder_weights="imagenet",
+        in_channels=3,
+        classes=num_classes,
         activation=None,
     )
-    model.to(device)
+    model.to(device).eval()
     return model
 
 def load_model(path):
     model = build_model()
-    model.load_state_dict(torch.load(path))
+    model.load_state_dict(torch.load(path, map_location=device))
     model.eval()
     return model
+
+def render_metrics_table_md(rows):
+    """Render list[dict] thành bảng Markdown, tránh phụ thuộc pyarrow/pandas."""
+    headers = ["class", "color_rgb", "dice", "iou", "pred_px>0", "gt_px>0"]
+    md = "| " + " | ".join(headers) + " |\n"
+    md += "|" + " | ".join(["---"]*len(headers)) + "|\n"
+    for r in rows:
+        md += f"| {r['class']} | {r['color_rgb']} | {r['dice']} | {r['iou']} | {r['pred_px>0']} | {r['gt_px>0']} |\n"
+    st.markdown(md)
 
 # ================= Resolve inputs =================
 device = "cuda" if (torch.cuda.is_available()) else "cpu"
@@ -166,21 +181,18 @@ else:
     with st.spinner("Khởi tạo & nạp checkpoint…"):
         model = load_model(ckpt_path)
 
-    #  DataLoader như test loop (không pandas) 
+    #  DataLoader như test loop (không pandas)
     ds = SimpleImageDataset([img_path], imagenet_norm=False)
-    loader = DataLoader(ds, batch_size=int(1), shuffle=False, num_workers=0, pin_memory=False)
+    loader = DataLoader(ds, batch_size=1, shuffle=False, num_workers=0, pin_memory=False)
 
-    xs, visses, paths = next(iter(loader))       # xs: [B,3,H,W] (CPU), visses: [B,H,W,3] np converted to list by collate
-    # visses là list các mảng (do dtype object), chuẩn hoá:
-    if isinstance(visses, list): vis0 = visses[0]
-    else:                         vis0 = np.array(visses[0])
+    xs, visses, paths = next(iter(loader))
+    vis0 = visses[0] if isinstance(visses, list) else np.array(visses[0])
     xs = xs.to(device, dtype=torch.float)
 
-    # giữ kích thước ảnh gốc bằng pad/unpad
-    xs, pads = pad_to_multiple(xs, int(32))
+    xs, pads = pad_to_multiple(xs, 32)
     with torch.no_grad():
         logits = model(xs)                       # [B,C,H',W']
-        # logits = unpad(logits, pads)             # [B,C,H,W] (khớp input)
+        # logits = unpad(logits, pads)           # (khuyến nghị bật lại nếu muốn khớp biên gốc)
         probs  = torch.sigmoid(logits)           # [B,C,H,W]
         bins   = (probs > float(thr)).float()    # [B,C,H,W]
 
@@ -201,14 +213,14 @@ else:
         pred_hwc.astype(np.float32) * float(alpha)
     ).clip(0,255).astype(np.uint8)
 
-    # ======= Hiển thị 1 hàng: Input | Overlay | Pred =======
+    # ======= Hiển thị 1 hàng: Input | Pred | Overlay =======
     st.subheader("Prediction")
     cA, cB, cC = st.columns(3)
     with cA: st.image(vis0,    caption=f"Input ({Wt}x{Ht})", use_column_width=True)
     with cB: st.image(pred_hwc,caption="Pred mask (HWC)",   use_column_width=True)
     with cC: st.image(overlay, caption="Overlay",           use_column_width=True)
-    
-    # ======= (Tuỳ chọn) hiển thị GT & overlay =======
+
+    # ======= (Tuỳ chọn) hiển thị & ĐÁNH GIÁ GT =======
     if gt_path and os.path.exists(gt_path):
         try:
             g = np.load(gt_path, allow_pickle=False)
@@ -238,8 +250,48 @@ else:
             st.subheader("Ground Truth")
             g0, g1, g2 = st.columns(3)
             with g0: st.image(vis0,    caption=f"Input ({Wt}x{Ht})", use_column_width=True)
-            with g1: st.image(g_rgb, caption="GT mask (HWC 0/255)", use_column_width=True)
+            with g1: st.image(g_rgb,   caption="GT mask (HWC 0/255)", use_column_width=True)
             with g2: st.image(g_overlay, caption="GT overlay", use_column_width=True)
+
+            # -------- Legend (kênh → màu) ----------
+            st.markdown("**Chú giải màu (Legend)** — mỗi *kênh* → một màu RGB:")
+            legend_cols = st.columns(num_classes)
+            palette = [(255,0,0), (0,255,0), (0,0,255)]  # ch0: đỏ, ch1: xanh lá, ch2: xanh dương
+            class_names = [f"Class {i}" for i in range(num_classes)]
+            bophan_names = ["ruột già" , "ruột non", "dạ dày"]
+            for i in range(num_classes):
+                chip = np.full((36, 36, 3), palette[i], dtype=np.uint8)
+                legend_cols[i].image(chip, caption=f"{class_names[i]} — {bophan_names[i]}", use_column_width=False)
+                
+            # ---------- Dice/IoU table ----------
+            C_pred = bin_1.shape[0]
+            C_gt   = gt_chw.shape[0]
+            K = min(C_pred, C_gt)
+
+            rows = []
+            dice_sum = 0.0
+            iou_sum  = 0.0
+            for c in range(K):
+                d, i, pp, gp = dice_iou(bin_1[c], gt_chw[c])
+                dice_sum += d; iou_sum += i
+                rows.append({
+                    "class": c,
+                    "color_rgb": f"{bophan_names[c] if c < len(bophan_names) else 'N/A'}",
+                    "dice": f"{d:.4f}",
+                    "iou": f"{i:.4f}",
+                    "pred_px>0": pp,
+                    "gt_px>0": gp
+                })
+
+            st.subheader("Dice / IoU theo lớp")
+            render_metrics_table_md(rows)  # << dùng Markdown, không còn pyarrow
+
+            # ---------- Download CSV ----------
+            csv_lines = ["class,color_rgb,dice,iou,pred_px_pos,gt_px_pos"]
+            for r in rows:
+                csv_lines.append(f"{r['class']},{r['color_rgb']},{r['dice']},{r['iou']},{r['pred_px>0']},{r['gt_px>0']}")
+            csv_bytes = ("\n".join(csv_lines)).encode("utf-8")
+            
 
         except Exception as e:
             st.warning(f"Không đọc được GT: {e}")
