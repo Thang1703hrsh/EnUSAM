@@ -40,15 +40,12 @@ with st.sidebar:
     st.markdown("---")
     st.subheader("Chọn file từ thư mục")
 
-    img_dir = st.text_input("Thư mục ảnh", value="Image")
-    msk_dir = st.text_input("Thư mục GT",  value="mask")
-
     # Liệt kê file
-    img_list = list_files(img_dir, (".npy", ".jpg", ".jpeg", ".png"))
-    gt_list  = list_files(msk_dir, (".npy",))
+    img_list = list_files("Image", (".npy", ".jpg", ".jpeg", ".png"))
+    gt_list  = list_files("mask", (".npy",))
 
     if not img_list:
-        st.warning(f"Không tìm thấy ảnh trong: {img_dir}")
+        st.warning(f"Không tìm thấy ảnh trong: Image")
     # Ảnh đầu vào (bắt buộc)
     img_path = st.selectbox(
         "Ảnh đầu vào",
